@@ -1,0 +1,21 @@
+{
+  "name": "cursed-grid-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ag-grid-community": "^32.3.2",
+    "ag-grid-enterprise": "^32.3.2",
+    "ag-grid-vue3": "^32.3.2",
+    "vue": "^3.5.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "vite": "^5.4.10"
+  }
+}
