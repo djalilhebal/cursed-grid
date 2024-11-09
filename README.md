@@ -7,7 +7,7 @@
     <em>Swift and precise, but balanced by sacrifice</em>
 </p>
 
-Database cursors x AG Grid's Viewport Row Model. An experiment. A non-solution.
+Database cursors x AG Grid's Viewport Row Model. An experiment. A non-solution. POC.
 
 The name is _not_ a reference to Grandblue Fantasy; although, [the game looks super cool][grandblue-belial].
 
@@ -19,6 +19,8 @@ Also, a katana resting on a stand forms a grid-like shape, symbolizing precision
 See also:
 
 - [PostgreSQL: Documentation: 17: 41.7. Cursors](https://www.postgresql.org/docs/current/plpgsql-cursors.html)
+
+- [ResultSet (Java Platform SE 8 )](https://docs.oracle.com/javase/8/docs/api/java/sql/ResultSet.html)
 
 - [Granblue Fantasy: Versus Belial Trailer - YouTube][grandblue-belial]
 
@@ -47,7 +49,7 @@ See also:
 
 ```
 The main idea:
-    backend-managed database cursors
+    Backend-managed database cursors
     If the initial query (complex joins or whatever) is slow, and offset/limits are slow
     just do it once
     maintain the cursor on the backend and just scroll it on the frontend
@@ -74,10 +76,65 @@ Using:
 
 ## A non-tutorial
 
-### Create the database and table
+The goal is to test slow queries:
+```sql
+EXPLAIN ANALYZE
+WITH omega AS (
+    SELECT
+        ROW_NUMBER() OVER (ORDER BY p.id) AS row_index,
+        p.*,
+        w.*,
+        pw.*
+    FROM
+        player_weapons AS pw
+        JOIN players AS p ON p.id = pw.player_id
+        JOIN weapons AS w ON w.id = pw.weapon_id
+    WHERE
+        deletion_date IS NULL
+    ORDER BY
+        p.id,
+        w.id
+)
+SELECT
+    row_to_json(omega) AS obj
+FROM
+    omega;
+```
+
+Result:
+- Execution took over 1,8s.
+- See `test-explain-analyze.txt`
+- [![Visualized](./test-explain-analyze.png)](https://explain.dalibo.com/plan/349454f7c3g9fgdb#grid)
+
+
+Suppose we are modeling an RPG-like game.
+
+Each player owns many weapons, which can belong to many players.
+
+For reproducibility, we specify a seed for the random number generator.
+
+Create queries that fill tables with fake data:
+
+**Weapons**
+Thousands of weapons
+
+**Players**:
+- Alicia
+- Barbara
+- Ciara
+- Diana
+- Emilia
+- Felicia, soft-deleted
+- Other random names, non-soft-deleted
+
+**Relations**:
+- Alicia has Cursed Katana
+- Other random relations between players and weapons
+
+### Create the database and user
 
 ```sql
-CREATE DATABASE wonderworks
+CREATE DATABASE wonderworks;
 
 \c wonderworks
 
@@ -86,54 +143,52 @@ CREATE USER hatter WITH PASSWORD '123456';
 ALTER USER hatter WITH SUPERUSER;
 ```
 
-### Table
+### Tables
+
+```sql
+DROP TABLE IF EXISTS player_weapons;
+DROP TABLE IF EXISTS players;
+DROP TABLE IF EXISTS weapons;
+```
 
 ```sql
 CREATE TABLE weapons (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL,
-    type VARCHAR(20) NOT NULL,      -- e.g., Sword, Bow, Staff
+    id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,             -- e.g., Sword, Bow, Staff
     rarity INTEGER CHECK (rarity BETWEEN 1 AND 5),  -- Star rating, 1-5 stars
     attack_power INTEGER,           -- Base attack power
-    element VARCHAR(20),            -- Fire, Water, Wind, Earth, etc.
+    element TEXT,                   -- Fire, Water, Wind, Earth, etc.
     crit_rate DECIMAL(4, 2),        -- Critical hit rate, e.g., 0.15 for 15%
     crit_damage DECIMAL(5, 2),      -- Critical damage multiplier, e.g., 1.5 for +50% damage
     effect_description TEXT,        -- Description of the weapon's special effect
     level INTEGER DEFAULT 1,        -- Level of the weapon, typically 1-20 or similar
-    upgrade_cost INTEGER,           -- Cost to upgrade the weapon
-    creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- When the weapon was added
+    upgrade_cost INTEGER            -- Cost to upgrade the weapon
+);
+
+CREATE TABLE players (
+    id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    name TEXT NOT NULL,
+    level INTEGER DEFAULT 1,
+    creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deletion_date TIMESTAMP DEFAULT null
+);
+
+CREATE TABLE player_weapons (
+    player_id INTEGER NOT NULL,
+    weapon_id INTEGER NOT NULL,
+    PRIMARY KEY(player_id, weapon_id)
 );
 ```
 
 ### Fake data
 
-```sql
-INSERT INTO weapons (
-    name,
-    type,
-    rarity,
-    attack_power,
-    element,
-    crit_rate,
-    crit_damage,
-    effect_description,
-    level,
-    upgrade_cost
-)
-SELECT
-    CONCAT(
-        CASE WHEN random() < 0.5 THEN 'Flame' ELSE 'Aqua' END,
-        CASE WHEN random() < 0.5 THEN ' Edge' ELSE ' Strike' END,
-        CAST(generate_series(1, 10000) AS VARCHAR)  -- Ensures unique name
-    ),
-    (ARRAY['Sword', 'Bow', 'Staff', 'Axe', 'Dagger', 'Spear'])[floor(random() * 6 + 1)::int],
-    floor(random() * 5 + 1)::int,                   -- Rarity from 1 to 5
-    floor(random() * 500 + 300)::int,               -- Attack power between 300 and 800
-    (ARRAY['Fire', 'Water', 'Wind', 'Earth', 'Lightning', 'Dark', 'Holy'])[floor(random() * 7 + 1)::FROM generate_series(1, 10);
-```
+See `db-seed.sql`
 
 
 ## Technical details
+
+![Using cursors](./psql-test-cursor.png)
 
 ### Embedded Postgres (did not work)
 
@@ -166,13 +221,17 @@ java.lang.IllegalStateException: Process [/tmp/embedded-pg/PG-1a75b2fdb57c5cfc86
 
 ### Known limitations
 
-- "Cache" invalidation issues.
+- "Cache invalidation" issues.
 
-- If sharing cursors, we end up with synchronization issues.
+- If we decide to share/reuse cursors between clients, we end up with synchronization issues.
 
-- Long lived cursors result in degraded and posssible storage issues in the database.
+- Long-lived cursors result in degraded performance and possible storage issues in the database.
 
-- Ordering, filtering, or partial selects results in different resultsets.
+- Long-lived cursors/transactions mean that
+the connection pool can be exhausted,
+or that the database server is overwhelmed since each connection creates a new process.
+
+- Ordering, filtering, or specific field selections result in different resultsets, which may not be cacheable by the database server.
 
 
 ## Credits

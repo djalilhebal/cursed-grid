@@ -1,0 +1,37 @@
+                                                                                   QUERY PLAN                                                                                   
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Subquery Scan on omega  (cost=115531.18..154637.91 rows=228455 width=32) (actual time=798.995..1808.071 rows=228360 loops=1)
+   ->  Incremental Sort  (cost=115531.18..151782.22 rows=228455 width=108) (actual time=798.972..975.936 rows=228360 loops=1)
+         Sort Key: p.id, w.id
+         Presorted Key: p.id
+         Full-sort Groups: 6894  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+         ->  WindowAgg  (cost=115530.87..145565.04 rows=228455 width=108) (actual time=798.926..888.449 rows=228360 loops=1)
+               ->  Gather Merge  (cost=115530.87..142138.22 rows=228455 width=100) (actual time=798.901..831.958 rows=228360 loops=1)
+                     Workers Planned: 2
+                     Workers Launched: 2
+                     ->  Sort  (cost=114530.85..114768.82 rows=95190 width=100) (actual time=779.864..787.842 rows=76120 loops=3)
+                           Sort Key: p.id
+                           Sort Method: external merge  Disk: 9144kB
+                           Worker 0:  Sort Method: external merge  Disk: 8848kB
+                           Worker 1:  Sort Method: external merge  Disk: 8824kB
+                           ->  Hash Join  (cost=3409.50..101451.34 rows=95190 width=100) (actual time=35.250..734.809 rows=76120 loops=3)
+                                 Hash Cond: (pw.player_id = p.id)
+                                 ->  Hash Join  (cost=522.50..97367.95 rows=455760 width=70) (actual time=16.763..630.062 rows=365915 loops=3)
+                                       Hash Cond: (pw.weapon_id = w.id)
+                                       ->  Parallel Seq Scan on player_weapons pw  (cost=0.00..85908.46 rows=4166346 width=8) (actual time=0.029..192.258 rows=3333077 loops=3)
+                                       ->  Hash  (cost=335.00..335.00 rows=15000 width=62) (actual time=16.613..16.613 rows=15000 loops=3)
+                                             Buckets: 16384  Batches: 1  Memory Usage: 1618kB
+                                             ->  Seq Scan on weapons w  (cost=0.00..335.00 rows=15000 width=62) (actual time=0.009..1.036 rows=15000 loops=3)
+                                 ->  Hash  (cost=1637.00..1637.00 rows=100000 width=30) (actual time=18.122..18.123 rows=99999 loops=3)
+                                       Buckets: 131072  Batches: 1  Memory Usage: 6493kB
+                                       ->  Seq Scan on players p  (cost=0.00..1637.00 rows=100000 width=30) (actual time=0.024..8.555 rows=99999 loops=3)
+                                             Filter: (deletion_date IS NULL)
+                                             Rows Removed by Filter: 1
+ Planning Time: 1.057 ms
+ JIT:
+   Functions: 61
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 5.545 ms, Inlining 0.000 ms, Optimization 3.356 ms, Emission 37.738 ms, Total 46.639 ms
+ Execution Time: 1818.381 ms
+(33 rows)
+
